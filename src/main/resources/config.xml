@@ -1,0 +1,5 @@
+<root>
+    <command name="dir" class="command_line.commands.Dir"/>
+    <command name="cd" class="command_line.commands.Cd"/>
+    <command name="pwd" class="command_line.commands.Pwd"/>
+</root>
