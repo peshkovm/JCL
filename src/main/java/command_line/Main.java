@@ -3,10 +3,11 @@ package command_line;
 import command_line.commands.Cd;
 import command_line.commands.Dir;
 import command_line.commands.Pwd;
-import javafx.scene.web.HTMLEditorSkin;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 
 public class Main {
     public static void main(String[] args) {
@@ -14,12 +15,13 @@ public class Main {
     }
 
     void start() {
-
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         String line;
         try {
             while (!(line = reader.readLine()).equals("exit")) {
-                if (line.contains("&&") || line.contains("||")) {
+                if (line.equals("jobs"))
+                    DaemonsHolder.printDaemons1();
+                else if (line.contains("&&") || line.contains("||")) {
                     int controlSymbolIndex;
                     if (line.contains("&&"))
                         controlSymbolIndex = line.indexOf("&&");
@@ -66,20 +68,25 @@ public class Main {
                     if (command.charAt(0) != '!') {
                         startProgramm(command, commandArgs);
                     } else {
-                        words[0] = command.substring(1);
-                        Process process = null;
-                        process = new ProcessBuilder(words).start();
-                        readFromWriteTo(process.getInputStream(), System.out);
-
-                        while (process.isAlive()) {
-                            readFromWriteTo(System.in, process.getOutputStream());
+                        if (line.charAt(line.length() - 1) == '&') {
+                            words[0] = command.substring(1, command.length() - 1);
+                            Process process = new ProcessBuilder(words).start();
+                            DaemonsHolder.addDaemon(words[0], process);
+                        } else {
+                            words[0] = command.substring(1);
+                            Process process = new ProcessBuilder(words).start();
                             readFromWriteTo(process.getInputStream(), System.out);
-                        }
-                        process.destroy();
-                        try {
-                            process.waitFor();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
+
+                            while (process.isAlive()) {
+                                readFromWriteTo(System.in, process.getOutputStream());
+                                readFromWriteTo(process.getInputStream(), System.out);
+                            }
+                            process.destroy();
+                            try {
+                                process.waitFor();
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
                         }
                     }
                 }
@@ -89,6 +96,92 @@ public class Main {
             System.out.println(e.getMessage());
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            DaemonsHolder.destroyAllDaemons();
+        }
+    }
+
+    private static class DaemonsHolder {
+        private static ArrayList<DaemonInfo> daemons;
+
+        static {
+            daemons = new ArrayList<>();
+        }
+
+        static void addDaemon(String name, Process process) {
+            DaemonInfo daemon = new DaemonInfo();
+            daemon.setName(name);
+            daemon.setProcess(process);
+            daemons.add(daemon);
+        }
+
+        static void printDaemons() {
+            for (int i = 0; i < daemons.size(); i++) {
+                DaemonInfo daemon = daemons.get(i);
+
+                if (daemon.getProcess().isAlive())
+                    System.out.println(daemon.getName());
+                else {
+                    daemon.getProcess().destroy();
+                    try {
+                        daemon.getProcess().waitFor();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    daemons.remove(i);
+                    //i--;
+                }
+            }
+        }
+
+        static void printDaemons1() {
+            Iterator<DaemonInfo> iterator = daemons.iterator();
+            while (iterator.hasNext()) {
+                DaemonInfo daemon = iterator.next();
+                if (daemon.getProcess().isAlive())
+                    System.out.println(daemon.getName());
+                else {
+                    daemon.getProcess().destroy();
+                    try {
+                        daemon.getProcess().waitFor();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    iterator.remove();
+                }
+            }
+        }
+
+        static void destroyAllDaemons() {
+            for (DaemonInfo daemon : daemons) {
+                daemon.getProcess().destroy();
+                try {
+                    daemon.getProcess().waitFor();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        private static class DaemonInfo {
+            private String name;
+            private Process process;
+
+            public String getName() {
+                return name;
+            }
+
+            public void setName(String name) {
+                this.name = name;
+            }
+
+            public Process getProcess() {
+                return process;
+            }
+
+            public void setProcess(Process process) {
+                this.process = process;
+            }
         }
     }
 
