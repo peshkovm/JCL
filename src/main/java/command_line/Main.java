@@ -5,21 +5,80 @@ import command_line.commands.Dir;
 import command_line.commands.Pwd;
 
 import java.io.*;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class Main {
+    private static ArrayList<ClientHolder> clients;
+
+    static {
+        clients = new ArrayList<>();
+    }
+
     public static void main(String[] args) {
         new Main().start();
     }
 
     void start() {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        ExecutorService service = null;
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+            System.out.println("net version? : yes|no");
+            String line = reader.readLine();
+
+            if (line.equals("yes")) {
+                ServerSocket serverSocket = new ServerSocket(1234);
+                while (!reader.readLine().equals("exit")) {
+                    Socket socket = serverSocket.accept();
+                    ClientHolder clientHolder = new ClientHolder(socket);
+                    clients.add(clientHolder);
+                    service = Executors.newCachedThreadPool();
+                    service.submit(clientHolder);
+                }
+            } else {
+                go(System.in, System.out);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                service.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS); //forever
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } finally {
+                service.shutdown();
+            }
+        }
+    }
+
+    private void who() {
+        for (ClientHolder client : clients) {
+            client.printName();
+        }
+    }
+
+    private void write() {
+
+    }
+
+    private void go(InputStream inStream, OutputStream outStream) {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(inStream));
+        StringWriter strWriter = new StringWriter();
         String line;
         try {
             while (!(line = reader.readLine()).equals("exit")) {
-                if (line.equals("jobs"))
+                if (line.equals("who")) {
+                    who();
+                } else if (line.equals("write")) {
+
+                } else if (line.equals("jobs"))
                     DaemonsHolder.printDaemons1();
                 else if (line.contains("&&") || line.contains("||")) {
                     int controlSymbolIndex;
@@ -42,18 +101,18 @@ public class Main {
                     //printTest(command1, commandArgs1, command2, commandArgs2);
                     if (line.contains("&&"))
                         try {
-                            startProgramm(command1, commandArgs1);
-                            startProgramm(command2, commandArgs2);
+                            startProgram(command1, commandArgs1, outStream);
+                            startProgram(command2, commandArgs2, outStream);
                         } catch (FileNotFoundException e) {
                             System.out.println(e.getMessage());
                         }
                     else
                         try {
-                            startProgramm(command1, commandArgs1);
+                            startProgram(command1, commandArgs1, outStream);
                         } catch (FileNotFoundException e) {
                             System.out.println(e.getMessage());
                             try {
-                                startProgramm(command2, commandArgs2);
+                                startProgram(command2, commandArgs2, outStream);
                             } catch (FileNotFoundException e1) {
                                 e1.getMessage();
                             }
@@ -66,7 +125,7 @@ public class Main {
                     if (line.contains(" "))
                         commandArgs = Arrays.copyOfRange(words, 1, words.length);
                     if (command.charAt(0) != '!') {
-                        startProgramm(command, commandArgs);
+                        startProgram(command, commandArgs, outStream);
                     } else {
                         if (line.charAt(line.length() - 1) == '&') {
                             words[0] = command.substring(1, command.length() - 1);
@@ -185,7 +244,46 @@ public class Main {
         }
     }
 
-    private void startProgramm(String command, String[] commandArgs) throws FileNotFoundException {
+    private class ClientHolder implements Runnable {
+        private InetAddress ip;
+        private Socket socket;
+        private InputStream inStream;
+        private OutputStream outStream;
+
+        ClientHolder(Socket socket) {
+            this.socket = socket;
+            this.ip = socket.getInetAddress();
+            try {
+                this.inStream = socket.getInputStream();
+                this.outStream = socket.getOutputStream();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        OutputStream getOutputStream() {
+            return outStream;
+        }
+
+        InputStream getInputStream() {
+            return inStream;
+        }
+
+        public InetAddress getIp() {
+            return ip;
+        }
+
+        void printName() {
+            System.out.println(ip.getHostName());
+        }
+
+        @Override
+        public void run() {
+            go(getInputStream(), getOutputStream());
+        }
+    }
+
+    private void startProgram(String command, String[] commandArgs, OutputStream outStream) throws FileNotFoundException {
         Dir dir = new Dir();
         Pwd pwd = new Pwd();
         Cd cd = new Cd();
@@ -193,25 +291,27 @@ public class Main {
         String className = XMLConfigReader.find(command);
         switch (className) {
             case "command_line.commands.Dir": {
-                dir.start();
+                dir.start(outStream);
                 break;
             }
             case "command_line.commands.Pwd": {
-                pwd.start();
+                pwd.start(outStream);
                 break;
             }
             case "command_line.commands.Cd": {
                 cd.start(commandArgs[0]);
                 break;
             }
-            default:
-                System.out.println("Not such command");
+            default: {
+                PrintStream writer = new PrintStream(outStream, true);
+                writer.println("Not such command");
+            }
         }
     }
 
     private void readFromWriteTo(InputStream reader, OutputStream writer) {
         BufferedReader reader1 = new BufferedReader(new InputStreamReader(reader));
-        PrintStream writer1 = new PrintStream(writer);
+        PrintStream writer1 = new PrintStream(writer, true);
         String lineFromProcess;
 
         try {
