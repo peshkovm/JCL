@@ -8,15 +8,18 @@ import java.io.*;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.FileSystems;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class Main {
     private static ArrayList<ClientHolder> clients;
+    StringBuffer lastMessageBuffer = new StringBuffer("There were no messages yet");
 
     static {
         clients = new ArrayList<>();
@@ -32,15 +35,17 @@ public class Main {
             BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
             System.out.println("net version? : yes|no");
             String line = reader.readLine();
+            System.out.println();
 
             if (line.equals("yes")) {
                 ServerSocket serverSocket = new ServerSocket(1234);
-                while (!reader.readLine().equals("exit")) {
+                while (true) {
                     Socket socket = serverSocket.accept();
                     ClientHolder clientHolder = new ClientHolder(socket);
                     clients.add(clientHolder);
                     service = Executors.newCachedThreadPool();
                     service.submit(clientHolder);
+                    //new Thread(clientHolder).start();
                 }
             } else {
                 go(System.in, System.out);
@@ -49,11 +54,10 @@ public class Main {
             e.printStackTrace();
         } finally {
             try {
+                service.shutdown();
                 service.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS); //forever
             } catch (InterruptedException e) {
                 e.printStackTrace();
-            } finally {
-                service.shutdown();
             }
         }
     }
@@ -65,7 +69,10 @@ public class Main {
     }
 
     private void write() {
-
+        for (ClientHolder client : clients) {
+            PrintWriter clientWriter = new PrintWriter(client.getOutputStream(), true);
+            clientWriter.println(lastMessageBuffer);
+        }
     }
 
     private void go(InputStream inStream, OutputStream outStream) {
@@ -74,82 +81,88 @@ public class Main {
         String line;
         try {
             while (!(line = reader.readLine()).equals("exit")) {
-                if (line.equals("who")) {
-                    who();
-                } else if (line.equals("write")) {
-
-                } else if (line.equals("jobs"))
-                    DaemonsHolder.printDaemons1();
-                else if (line.contains("&&") || line.contains("||")) {
-                    int controlSymbolIndex;
-                    if (line.contains("&&"))
-                        controlSymbolIndex = line.indexOf("&&");
-                    else
-                        controlSymbolIndex = line.indexOf("||");
-                    String str1 = line.substring(0, controlSymbolIndex - 1);
-                    String str2 = line.substring(controlSymbolIndex + "&& ".length(), line.length());
-
-                    String[] words1 = str1.split("\\s+");
-                    String[] words2 = str2.split("\\s+");
-
-                    String command1 = words1[0];
-                    String command2 = words2[0];
-
-                    String[] commandArgs1 = Arrays.copyOfRange(words1, 1, words1.length);
-                    String[] commandArgs2 = Arrays.copyOfRange(words2, 1, words2.length);
-
-                    //printTest(command1, commandArgs1, command2, commandArgs2);
-                    if (line.contains("&&"))
-                        try {
-                            startProgram(command1, commandArgs1, outStream);
-                            startProgram(command2, commandArgs2, outStream);
-                        } catch (FileNotFoundException e) {
-                            System.out.println(e.getMessage());
-                        }
-                    else
-                        try {
-                            startProgram(command1, commandArgs1, outStream);
-                        } catch (FileNotFoundException e) {
-                            System.out.println(e.getMessage());
-                            try {
-                                startProgram(command2, commandArgs2, outStream);
-                            } catch (FileNotFoundException e1) {
-                                e1.getMessage();
-                            }
-                        }
+                if (line.equals("write")) {
+                    write();
                 } else {
-                    String[] words = line.split("\\s+");
-                    String command = words[0];
-                    String[] commandArgs = {""};
+                    lastMessageBuffer.delete(0, lastMessageBuffer.length());
+                    if (line.equals("who")) {
+                        who();
+                    } else if (line.equals("jobs"))
+                        DaemonsHolder.printDaemons1(outStream);
+                    else if (line.contains("&&") || line.contains("||")) {
+                        int controlSymbolIndex;
+                        if (line.contains("&&"))
+                            controlSymbolIndex = line.indexOf("&&");
+                        else
+                            controlSymbolIndex = line.indexOf("||");
+                        String str1 = line.substring(0, controlSymbolIndex - 1);
+                        String str2 = line.substring(controlSymbolIndex + "&& ".length(), line.length());
 
-                    if (line.contains(" "))
-                        commandArgs = Arrays.copyOfRange(words, 1, words.length);
-                    if (command.charAt(0) != '!') {
-                        startProgram(command, commandArgs, outStream);
-                    } else {
-                        if (line.charAt(line.length() - 1) == '&') {
-                            words[0] = command.substring(1, command.length() - 1);
-                            Process process = new ProcessBuilder(words).start();
-                            DaemonsHolder.addDaemon(words[0], process);
-                        } else {
-                            words[0] = command.substring(1);
-                            Process process = new ProcessBuilder(words).start();
-                            readFromWriteTo(process.getInputStream(), System.out);
+                        String[] words1 = str1.split("\\s+");
+                        String[] words2 = str2.split("\\s+");
 
-                            while (process.isAlive()) {
-                                readFromWriteTo(System.in, process.getOutputStream());
-                                readFromWriteTo(process.getInputStream(), System.out);
-                            }
-                            process.destroy();
+                        String command1 = words1[0];
+                        String command2 = words2[0];
+
+                        String[] commandArgs1 = Arrays.copyOfRange(words1, 1, words1.length);
+                        String[] commandArgs2 = Arrays.copyOfRange(words2, 1, words2.length);
+
+                        //printTest(command1, commandArgs1, command2, commandArgs2);
+                        if (line.contains("&&"))
                             try {
-                                process.waitFor();
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
+                                startProgram(command1, commandArgs1, strWriter);
+                                startProgram(command2, commandArgs2, strWriter);
+                            } catch (FileNotFoundException e) {
+                                System.out.println(e.getMessage());
+                            }
+                        else
+                            try {
+                                startProgram(command1, commandArgs1, strWriter);
+                            } catch (FileNotFoundException e) {
+                                System.out.println(e.getMessage());
+                                try {
+                                    startProgram(command2, commandArgs2, strWriter);
+                                } catch (FileNotFoundException e1) {
+                                    e1.getMessage();
+                                }
+                            }
+                    } else {
+                        String[] words = line.split("\\s+");
+                        String command = words[0];
+                        String[] commandArgs = {""};
+
+                        if (line.contains(" "))
+                            commandArgs = Arrays.copyOfRange(words, 1, words.length);
+                        if (command.charAt(0) != '!') {
+                            startProgram(command, commandArgs, strWriter);
+                        } else {
+                            if (line.charAt(line.length() - 1) == '&') {
+                                words[0] = command.substring(1, command.length() - 1);
+                                Process process = new ProcessBuilder(words).start();
+                                DaemonsHolder.addDaemon(words[0], process);
+                            } else {
+                                words[0] = command.substring(1);
+                                Process process = new ProcessBuilder(words).start();
+                                readFromWriteTo(process.getInputStream(), System.out);
+
+                                while (process.isAlive()) {
+                                    readFromWriteTo(System.in, process.getOutputStream());
+                                    readFromWriteTo(process.getInputStream(), System.out);
+                                }
+                                process.destroy();
+                                try {
+                                    process.waitFor();
+                                } catch (InterruptedException e) {
+                                    e.printStackTrace();
+                                }
                             }
                         }
                     }
+                    lastMessageBuffer = strWriter.getBuffer();
+                    PrintWriter writer = new PrintWriter(outStream, true);
+                    writer.println(lastMessageBuffer);
+                    //writer.println();
                 }
-                System.out.println();
             }
         } catch (FileNotFoundException e) {
             System.out.println(e.getMessage());
@@ -174,31 +187,13 @@ public class Main {
             daemons.add(daemon);
         }
 
-        static void printDaemons() {
-            for (int i = 0; i < daemons.size(); i++) {
-                DaemonInfo daemon = daemons.get(i);
-
-                if (daemon.getProcess().isAlive())
-                    System.out.println(daemon.getName());
-                else {
-                    daemon.getProcess().destroy();
-                    try {
-                        daemon.getProcess().waitFor();
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                    daemons.remove(i);
-                    //i--;
-                }
-            }
-        }
-
-        static void printDaemons1() {
+        static void printDaemons1(OutputStream outStream) {
+            PrintWriter writer = new PrintWriter(outStream, true);
             Iterator<DaemonInfo> iterator = daemons.iterator();
             while (iterator.hasNext()) {
                 DaemonInfo daemon = iterator.next();
                 if (daemon.getProcess().isAlive())
-                    System.out.println(daemon.getName());
+                    writer.println(daemon.getName());
                 else {
                     daemon.getProcess().destroy();
                     try {
@@ -274,7 +269,8 @@ public class Main {
         }
 
         void printName() {
-            System.out.println(ip.getHostName());
+            PrintWriter writer = new PrintWriter(getOutputStream(), true);
+            writer.println(ip.getHostAddress());
         }
 
         @Override
@@ -283,7 +279,7 @@ public class Main {
         }
     }
 
-    private void startProgram(String command, String[] commandArgs, OutputStream outStream) throws FileNotFoundException {
+    private void startProgram(String command, String[] commandArgs, StringWriter outStream) throws FileNotFoundException {
         Dir dir = new Dir();
         Pwd pwd = new Pwd();
         Cd cd = new Cd();
@@ -303,7 +299,7 @@ public class Main {
                 break;
             }
             default: {
-                PrintStream writer = new PrintStream(outStream, true);
+                PrintWriter writer = new PrintWriter(outStream, true);
                 writer.println("Not such command");
             }
         }
